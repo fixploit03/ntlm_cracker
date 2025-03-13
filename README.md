@@ -16,13 +16,8 @@ sudo make install
 # Usage
 
 ```
-ntlm_cracker -f <hash_file> -w <wordlist> [-o <output_file>] [-h]
+ntlm_cracker -f <hash_file> -w <wordlist>
 ```
-
-## Demos
-
-https://github.com/user-attachments/assets/067b249d-1202-49c3-952f-a1b170d25d32
-
 
 
 
