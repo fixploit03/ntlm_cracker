@@ -1,6 +1,6 @@
 # NTLM Cracker
 
-NTLM Hash Cracker
+NTLM Hash Cracker.
 
 ## Install
 
