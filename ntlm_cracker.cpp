@@ -42,6 +42,19 @@ void print_banner() {
     std::cout << "--------------------------------------------------\n\n";
 }
 
+std::string get_banner_string() {
+    std::stringstream ss;
+    ss << "-------------------------------------------------\n";
+    ss << "       ╔╗╔╔╦╗╦  ╔╦╗  ╔═╗╦═╗╔═╗╔═╗╦╔═╔═╗╦═╗      \n";
+    ss << "       ║║║ ║ ║  ║║║  ║  ╠╦╝╠═╣║  ╠╩╗║╣ ╠╦╝\n";
+    ss << "       ╝╚╝ ╩ ╩═╝╩ ╩  ╚═╝╩╚═╩ ╩╚═╝╩ ╩╚═╝╩╚═\n\n";
+    ss << "                NTLM Hash Cracker\n";
+    ss << "              By: Rofi (Fixploit03)\n";
+    ss << "    https://github.com/fixploit03/ntlm_cracker\n";
+    ss << "--------------------------------------------------\n\n";
+    return ss.str();
+}
+
 void print_help(const char* program_name) {
     print_banner();
     std::cout << "Usage: " << program_name << " -f <hash_file> -w <wordlist> [-o <output_file>] [-h]\n\n";
@@ -51,7 +64,7 @@ void print_help(const char* program_name) {
     std::cout << "  -o <output_file>  Specify the output file to save cracked passwords (optional)\n";
     std::cout << "  -h                Show this help message and exit\n\n";
     std::cout << "Example:\n";
-    std::cout << "  " << program_name << " -f hash.txt -w /usr/share/wordlists/rockyou -o result.txt\n";
+    std::cout << "  " << program_name << " -f hash.txt -w /usr/share/wordlists/rockyou.txt -o result.txt\n";
 }
 
 std::vector<uint8_t> string_to_utf16le(const std::string& str) {
@@ -216,7 +229,8 @@ int main(int argc, char* argv[]) {
     std::cout << "\rProgress: 100.00%\n";
 
     if (!found_passwords.empty()) {
-        std::cout << "\n======= Summary of Found Passwords =======\n\n";
+        print_banner();
+        std::cout << "======= Summary of Found Passwords =======\n\n";
         for (const auto& [hash, password] : found_passwords) {
             std::cout << "[+] " << hash_to_user[hash] << ":" << hash << ":" << password << "\n";
         }
@@ -232,6 +246,7 @@ int main(int argc, char* argv[]) {
         }
 
         if (!found_passwords.empty()) {
+            out_file << get_banner_string();
             out_file << "======= Summary of Found Passwords =======\n\n";
             for (const auto& [hash, password] : found_passwords) {
                 out_file << "[+] " << hash_to_user[hash] << ":" << hash << ":" << password << "\n";
