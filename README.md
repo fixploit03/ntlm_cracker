@@ -19,5 +19,7 @@ sudo make install
 ntlm_cracker -f <hash_file> -w <wordlist>
 ```
 
+## Screenshot
 
+![](https://github.com/fixploit03/ntlm_cracker/blob/main/ss_ntlm_cracker.png)
 
