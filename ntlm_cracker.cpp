@@ -1,9 +1,8 @@
 /*
  * NTLM Hash Cracker
  * Author: Rofi (Fixploit03)
- * Github: https://github.com/fixploit03/ntlm_cracker
- *
-*/
+ * GitHub: https://github.com/fixploit03/ntlm_cracker
+ */
 
 #include <iostream>
 #include <fstream>
@@ -11,7 +10,6 @@
 #include <vector>
 #include <iomanip>
 #include <sstream>
-#include <map>
 #include <unordered_map>
 #include <thread>
 #include <mutex>
@@ -19,22 +17,71 @@
 #include <unistd.h>
 #include <algorithm>
 #include <atomic>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <cmath>
+#include <stdexcept>
 #include <ctime>
+
+class BloomFilter {
+    std::vector<bool> bits;
+    size_t size;
+    size_t num_hashes;
+
+    size_t hash1(const std::string& str) const {
+        size_t h = 0;
+        for (char c : str) h = h * 31 + c;
+        return h % size;
+    }
+
+    size_t hash2(const std::string& str) const {
+        size_t h = 0;
+        for (char c : str) h = h * 17 + c;
+        return h % size;
+    }
+
+public:
+    BloomFilter(size_t n, double false_positive_rate = 0.01) {
+        try {
+            double calc_size = -n * std::log(false_positive_rate) / (std::log(2) * std::log(2));
+            size = static_cast<size_t>(calc_size);
+            if (size < n) size = n * 10;
+            if (size > 1000000000) size = 1000000000;
+            num_hashes = static_cast<size_t>(size * std::log(2) / n);
+            if (num_hashes < 2) num_hashes = 2;
+            bits.resize(size, false);
+        } catch (const std::exception& e) {
+            throw std::runtime_error("Failed to initialize Bloom Filter: " + std::string(e.what()));
+        }
+    }
+
+    void add(const std::string& str) {
+        bits[hash1(str)] = true;
+        bits[hash2(str)] = true;
+    }
+
+    bool might_contain(const std::string& str) const {
+        return bits[hash1(str)] && bits[hash2(str)];
+    }
+};
 
 struct HashEntry {
     std::string username;
-    std::string rid;
-    std::string lm_hash;
     std::string ntlm_hash;
 };
 
 std::mutex mtx;
-size_t total_words = 0;
 std::atomic<size_t> processed_words(0);
+std::atomic<bool> password_found(false);
+size_t total_words = 0;
 
 std::string get_timestamp() {
     std::time_t now = std::time(nullptr);
     std::tm* local_time = std::localtime(&now);
+    if (!local_time) {
+        std::cerr << "[-] Warning: Failed to retrieve local time\n";
+        return "00:00:00 /0000-00-00/";
+    }
     std::stringstream ss;
     ss << std::setfill('0') << std::setw(2) << local_time->tm_hour << ":"
        << std::setfill('0') << std::setw(2) << local_time->tm_min << ":"
@@ -45,67 +92,46 @@ std::string get_timestamp() {
     return ss.str();
 }
 
-void print_banner() {
-    std::cout << "-------------------------------------------------\n";
-    std::cout << "       ╔╗╔╔╦╗╦  ╔╦╗  ╔═╗╦═╗╔═╗╔═╗╦╔═╔═╗╦═╗      \n";
-    std::cout << "       ║║║ ║ ║  ║║║  ║  ╠╦╝╠═╣║  ╠╩╗║╣ ╠╦╝\n";
-    std::cout << "       ╝╚╝ ╩ ╩═╝╩ ╩  ╚═╝╩╚═╩ ╩╚═╝╩ ╩╚═╝╩╚═\n\n";
-    std::cout << "                NTLM Hash Cracker\n";
-    std::cout << "              By: Rofi (Fixploit03)\n";
-    std::cout << "    https://github.com/fixploit03/ntlm_cracker\n";
-    std::cout << "--------------------------------------------------\n\n";
-}
-
-std::string get_banner_string() {
-    std::stringstream ss;
-    ss << "-------------------------------------------------\n";
-    ss << "       ╔╗╔╔╦╗╦  ╔╦╗  ╔═╗╦═╗╔═╗╔═╗╦╔═╔═╗╦═╗      \n";
-    ss << "       ║║║ ║ ║  ║║║  ║  ╠╦╝╠═╣║  ╠╩╗║╣ ╠╦╝\n";
-    ss << "       ╝╚╝ ╩ ╩═╝╩ ╩  ╚═╝╩╚═╩ ╩╚═╝╩ ╩╚═╝╩╚═\n\n";
-    ss << "                NTLM Hash Cracker\n";
-    ss << "              By: Rofi (Fixploit03)\n";
-    ss << "    https://github.com/fixploit03/ntlm_cracker\n";
-    ss << "--------------------------------------------------\n\n";
-    return ss.str();
-}
-
-void print_help(const char* program_name) {
-    print_banner();
-    std::cout << "Usage: " << program_name << " -f <hash_file> -w <wordlist> [-o <output_file>] [-h]\n\n";
-    std::cout << "Options:\n";
-    std::cout << "  -f <hash_file>    Specify the file containing hashdump (format: user:rid:lm:ntlm:::)\n";
-    std::cout << "  -w <wordlist>     Specify the wordlist file for dictionary attack\n";
-    std::cout << "  -o <output_file>  Specify the output file to save cracked passwords (optional)\n";
-    std::cout << "  -h                Show this help message and exit\n\n";
-    std::cout << "Example:\n";
-    std::cout << "  " << program_name << " -f hash.txt -w /usr/share/wordlists/rockyou.txt -o result.txt\n";
-}
-
 std::vector<uint8_t> string_to_utf16le(const std::string& str) {
     std::vector<uint8_t> utf16;
-    utf16.reserve(str.size() * 2);
-    for (char c : str) {
-        utf16.push_back(static_cast<uint8_t>(c));
-        utf16.push_back(0);
+    try {
+        utf16.reserve(str.size() * 2);
+        for (char c : str) {
+            utf16.push_back(static_cast<uint8_t>(c));
+            utf16.push_back(0);
+        }
+    } catch (const std::exception& e) {
+        throw std::runtime_error("Failed to convert string to UTF-16LE: " + std::string(e.what()));
     }
     return utf16;
 }
 
 std::string compute_md4(const std::vector<uint8_t>& data) {
     EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+    if (!ctx) throw std::runtime_error("Failed to create EVP_MD_CTX");
+
     const EVP_MD* md = EVP_md4();
+    if (!md) {
+        EVP_MD_CTX_free(ctx);
+        throw std::runtime_error("MD4 not supported by OpenSSL");
+    }
+
     unsigned char hash[EVP_MAX_MD_SIZE];
     unsigned int hash_len;
 
-    EVP_DigestInit_ex(ctx, md, nullptr);
-    EVP_DigestUpdate(ctx, data.data(), data.size());
-    EVP_DigestFinal_ex(ctx, hash, &hash_len);
+    if (EVP_DigestInit_ex(ctx, md, nullptr) != 1 ||
+        EVP_DigestUpdate(ctx, data.data(), data.size()) != 1 ||
+        EVP_DigestFinal_ex(ctx, hash, &hash_len) != 1) {
+        EVP_MD_CTX_free(ctx);
+        throw std::runtime_error("Failed to compute MD4 hash");
+    }
+
     EVP_MD_CTX_free(ctx);
 
     std::stringstream ss;
     ss << std::hex << std::setfill('0');
     for (unsigned int i = 0; i < hash_len; ++i) {
-        ss << std::setw(2) << (int)hash[i];
+        ss << std::setw(2) << static_cast<int>(hash[i]);
     }
     return ss.str();
 }
@@ -114,165 +140,179 @@ std::vector<HashEntry> read_hashdump_file(const std::string& filename) {
     std::vector<HashEntry> entries;
     std::ifstream file(filename);
     if (!file.is_open()) {
-        std::cerr << "Error: Could not open hash file: " << filename << "\n";
-        return entries;
+        throw std::runtime_error("Failed to open hash file: " + filename);
     }
 
     std::string line;
+    size_t line_num = 0;
     while (std::getline(file, line)) {
+        line_num++;
         line.erase(std::remove(line.begin(), line.end(), '\r'), line.end());
         line.erase(std::remove(line.begin(), line.end(), '\n'), line.end());
         if (line.empty()) continue;
 
         std::stringstream ss(line);
         std::string username, rid, lm_hash, ntlm_hash, temp;
-        if (std::getline(ss, username, ':') &&
-            std::getline(ss, rid, ':') &&
-            std::getline(ss, lm_hash, ':') &&
-            std::getline(ss, ntlm_hash, ':')) {
-            if (std::getline(ss, temp) && temp == "::") {
-                entries.push_back({username, rid, lm_hash, ntlm_hash});
-            }
+        if (!std::getline(ss, username, ':') ||
+            !std::getline(ss, rid, ':') ||
+            !std::getline(ss, lm_hash, ':') ||
+            !std::getline(ss, ntlm_hash, ':')) {
+            std::cerr << "[-] Warning: Invalid format on line " << line_num << " in " << filename << "\n";
+            continue;
         }
+        if (std::getline(ss, temp) && temp != "::") {
+            std::cerr << "[-] Warning: Invalid suffix on line " << line_num << " in " << filename << "\n";
+            continue;
+        }
+        if (ntlm_hash.size() != 32) {
+            std::cerr << "[-] Warning: Invalid NTLM hash length on line " << line_num << " in " << filename << "\n";
+            continue;
+        }
+        entries.push_back({username, ntlm_hash});
     }
     file.close();
+    if (entries.empty()) {
+        throw std::runtime_error("No valid hash entries found in " + filename);
+    }
     return entries;
 }
 
-void crack_segment(const std::vector<std::string>& wordlist_segment,
+void crack_segment(const char* wordlist_data, off_t start, off_t end,
                    const std::unordered_map<std::string, std::string>& hash_to_user,
-                   std::map<std::string, std::string>& found_passwords) {
-    for (const auto& line : wordlist_segment) {
-        std::vector<uint8_t> utf16 = string_to_utf16le(line);
-        std::string hash = compute_md4(utf16);
-
-        std::lock_guard<std::mutex> lock(mtx);
-        processed_words++;
-        double progress = (static_cast<double>(processed_words) / total_words) * 100.0;
-        std::cout << "\rProgress: " << std::fixed << std::setprecision(2) << progress << "%" << std::flush;
-
-        auto it = hash_to_user.find(hash);
-        if (it != hash_to_user.end()) {
-            std::cout << "\nPassword found for user " << it->second 
-                      << " (hash: " << hash << "): " << line << "\n";
-            found_passwords[hash] = line;
+                   const BloomFilter& bloom) {
+    std::string line;
+    try {
+        for (off_t i = start; i < end; ++i) {
+            if (wordlist_data[i] == '\n' || wordlist_data[i] == '\r') {
+                if (!line.empty()) {
+                    std::vector<uint8_t> utf16 = string_to_utf16le(line);
+                    std::string hash = compute_md4(utf16);
+                    if (bloom.might_contain(hash)) {
+                        auto it = hash_to_user.find(hash);
+                        if (it != hash_to_user.end()) {
+                            std::lock_guard<std::mutex> lock(mtx);
+                            std::cout << "[+] Password found for user " << it->second
+                                      << " (hash: " << hash << "): " << line << "\n";
+                            password_found = true; // Set flag jika kata sandi ditemukan
+                        }
+                    }
+                    line.clear();
+                }
+                processed_words++;
+            } else {
+                line += wordlist_data[i];
+            }
         }
+        if (!line.empty()) {
+            std::vector<uint8_t> utf16 = string_to_utf16le(line);
+            std::string hash = compute_md4(utf16);
+            if (bloom.might_contain(hash)) {
+                auto it = hash_to_user.find(hash);
+                if (it != hash_to_user.end()) {
+                    std::lock_guard<std::mutex> lock(mtx);
+                    std::cout << "[+] Password found for user " << it->second
+                              << " (hash: " << hash << "): " << line << "\n";
+                    password_found = true; // Set flag jika kata sandi ditemukan
+                }
+            }
+        }
+    } catch (const std::exception& e) {
+        std::lock_guard<std::mutex> lock(mtx);
+        std::cerr << "[-] Error in cracking segment: " << e.what() << "\n";
     }
 }
 
 int main(int argc, char* argv[]) {
-    std::string hash_file;
-    std::string wordlist_file;
-    std::string output_file;
+    std::string hash_file, wordlist_file;
     int opt;
 
-    while ((opt = getopt(argc, argv, "f:w:o:h")) != -1) {
+    while ((opt = getopt(argc, argv, "f:w:")) != -1) {
         switch (opt) {
             case 'f': hash_file = optarg; break;
             case 'w': wordlist_file = optarg; break;
-            case 'o': output_file = optarg; break;
-            case 'h':
-                print_help(argv[0]);
-                return 0;
             default:
-                std::cerr << "Usage: " << argv[0] << " -f <hash_file> -w <wordlist> [-o <output_file>] [-h]\n";
+                std::cout << "Usage: " << argv[0] << " -f <hash_file> -w <wordlist>\n";
                 return 1;
         }
     }
 
-    print_banner();
-    std::cout << "[*] starting @ " << get_timestamp() << "\n\n";
-
-    if (hash_file.empty() || wordlist_file.empty()) {
-        std::cerr << "Error: Both -f <hash_file> and -w <wordlist> are required.\n";
-        std::cerr << "Use -h for help.\n";
+    if (optind < argc || hash_file.empty() || wordlist_file.empty()) {
+        std::cout << "Usage: " << argv[0] << " -f <hash_file> -w <wordlist>\n";
         return 1;
     }
 
-    std::vector<HashEntry> hash_entries = read_hashdump_file(hash_file);
-    if (hash_entries.empty()) {
-        std::cerr << "Error: No valid hashdump entries found in file: " << hash_file << "\n";
-        return 1;
-    }
+    try {
+        std::cout << "\n[*] Starting at " << get_timestamp() << "\n\n";
 
-    std::unordered_map<std::string, std::string> hash_to_user;
-    for (const auto& entry : hash_entries) {
-        hash_to_user[entry.ntlm_hash] = entry.username;
-    }
+        std::cout << "[*] Counting hashes to be cracked...\n";
+        std::vector<HashEntry> hash_entries = read_hashdump_file(hash_file);
+        std::cout << "[+] Number of hashes to be cracked: " << hash_entries.size() << "\n";
 
-    std::ifstream fp(wordlist_file);
-    if (!fp.is_open()) {
-        std::cerr << "Error: Could not open wordlist file: " << wordlist_file << "\n";
-        return 1;
-    }
-
-    std::vector<std::string> wordlist;
-    std::string line;
-    while (std::getline(fp, line)) {
-        line.erase(std::remove(line.begin(), line.end(), '\r'), line.end());
-        line.erase(std::remove(line.begin(), line.end(), '\n'), line.end());
-        if (!line.empty()) wordlist.push_back(line);
-    }
-    fp.close();
-
-    total_words = wordlist.size();
-    if (total_words == 0) {
-        std::cerr << "Error: Wordlist is empty.\n";
-        return 1;
-    }
-
-    unsigned int num_threads = std::thread::hardware_concurrency();
-    if (num_threads == 0) num_threads = 4;
-    std::vector<std::thread> threads;
-    std::map<std::string, std::string> found_passwords;
-
-    std::cout << "Progress: 0.00%" << std::flush;
-
-    size_t segment_size = wordlist.size() / num_threads;
-    for (unsigned int i = 0; i < num_threads; ++i) {
-        size_t start = i * segment_size;
-        size_t end = (i == num_threads - 1) ? wordlist.size() : (i + 1) * segment_size;
-        std::vector<std::string> segment(wordlist.begin() + start, wordlist.begin() + end);
-        threads.emplace_back(crack_segment, segment, std::ref(hash_to_user), 
-                             std::ref(found_passwords));
-    }
-
-    for (auto& t : threads) {
-        t.join();
-    }
-
-    std::cout << "\rProgress: 100.00%\n";
-
-    if (!found_passwords.empty()) {
-        std::cout << "\n======= Summary of Found Passwords =======\n\n";
-        for (const auto& [hash, password] : found_passwords) {
-            std::cout << "[+] " << hash_to_user[hash] << ":" << hash << ":" << password << "\n";
-        }
-    } else {
-        std::cout << "\nNo passwords found for any hash in the file.\n";
-    }
-
-    if (!output_file.empty()) {
-        std::ofstream out_file(output_file);
-        if (!out_file.is_open()) {
-            std::cerr << "Error: Could not open output file: " << output_file << "\n";
-            return 1;
+        BloomFilter bloom(hash_entries.size());
+        std::unordered_map<std::string, std::string> hash_to_user;
+        for (const auto& entry : hash_entries) {
+            hash_to_user[entry.ntlm_hash] = entry.username;
+            bloom.add(entry.ntlm_hash);
         }
 
-        if (!found_passwords.empty()) {
-            out_file << get_banner_string();
-            out_file << "======= Summary of Found Passwords =======\n\n";
-            for (const auto& [hash, password] : found_passwords) {
-                out_file << "[+] " << hash_to_user[hash] << ":" << hash << ":" << password << "\n";
-            }
-        } else {
-            out_file << "No passwords found for any hash in the file.\n";
+        int fd = open(wordlist_file.c_str(), O_RDONLY);
+        if (fd == -1) {
+            throw std::runtime_error("Failed to open wordlist file: " + wordlist_file);
         }
-        out_file.close();
-        std::cout << "\n[+] Results saved to: " << output_file << "\n";
-    }
 
-    std::cout << "\n[*] ending @ " << get_timestamp() << "\n";
+        off_t file_size = lseek(fd, 0, SEEK_END);
+        if (file_size == -1) {
+            close(fd);
+            throw std::runtime_error("Failed to determine wordlist file size");
+        }
+
+        char* wordlist_data = static_cast<char*>(mmap(nullptr, file_size, PROT_READ, MAP_PRIVATE, fd, 0));
+        if (wordlist_data == MAP_FAILED) {
+            close(fd);
+            throw std::runtime_error("Failed to map wordlist file into memory");
+        }
+
+        std::cout << "[*] Counting passwords to be attempted...\n";
+        total_words = std::count(wordlist_data, wordlist_data + file_size, '\n');
+        if (total_words == 0) {
+            munmap(wordlist_data, file_size);
+            close(fd);
+            throw std::runtime_error("Wordlist file is empty: " + wordlist_file);
+        }
+        std::cout << "[+] Number of passwords to be attempted: " << total_words << "\n";
+
+        std::cout << "[*] Cracking hashes...\n";
+        unsigned int num_threads = std::thread::hardware_concurrency();
+        if (num_threads == 0) num_threads = 4;
+        std::vector<std::thread> threads;
+
+        off_t segment_size = file_size / num_threads;
+        for (unsigned int i = 0; i < num_threads; ++i) {
+            off_t start = i * segment_size;
+            off_t end = (i == num_threads - 1) ? file_size : (i + 1) * segment_size;
+            threads.emplace_back(crack_segment, wordlist_data, start, end, std::ref(hash_to_user), std::ref(bloom));
+        }
+
+        for (auto& t : threads) {
+            t.join();
+        }
+
+        if (!password_found) {
+            std::cout << "[*] No passwords were found in the wordlist.\n";
+        }
+
+        std::cout << "[*] Finished\n";
+        std::cout << "\n[*] Ending at " << get_timestamp() << "\n";
+
+        if (munmap(wordlist_data, file_size) == -1) {
+            std::cerr << "[-] Warning: Failed to unmap wordlist memory.\n";
+        }
+        close(fd);
+
+    } catch (const std::exception& e) {
+        std::cerr << "[-] Fatal error: " << e.what() << "\n";
+        return 1;
+    }
 
     return 0;
 }
