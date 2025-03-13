@@ -42,7 +42,6 @@ void print_banner() {
     std::cout << "--------------------------------------------------\n\n";
 }
 
-// Fungsi untuk mengembalikan banner sebagai string (untuk file output)
 std::string get_banner_string() {
     std::stringstream ss;
     ss << "-------------------------------------------------\n";
