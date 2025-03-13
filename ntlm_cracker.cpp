@@ -317,21 +317,31 @@ int main(int argc, char* argv[]) {
     char* wordlist_data = nullptr;
     off_t file_size = 0;
 
+    opterr = 0;
+
+    while ((opt = getopt(argc, argv, "f:w:")) != -1) {
+        switch (opt) {
+            case 'f':
+                hash_file = optarg;
+                break;
+            case 'w':
+                wordlist_file = optarg;
+                break;
+            case '?': 
+                std::cout << "Usage: " << argv[0] << " -f <hash_file> -w <wordlist>\n";
+                return 1;
+            default:
+                std::cout << "Usage: " << argv[0] << " -f <hash_file> -w <wordlist>\n";
+                return 1;
+        }
+    }
+
+    if (hash_file.empty() || wordlist_file.empty() || optind < argc) {
+        std::cout << "Usage: " << argv[0] << " -f <hash_file> -w <wordlist>\n";
+        return 1;
+    }
+
     try {
-        while ((opt = getopt(argc, argv, "f:w:")) != -1) {
-            switch (opt) {
-                case 'f': hash_file = optarg; break;
-                case 'w': wordlist_file = optarg; break;
-                default:
-                    std::cout << "Usage: " << argv[0] << " -f <hash_file> -w <wordlist>\n";
-                    return 1;
-            }
-        }
-
-        if (optind < argc || hash_file.empty() || wordlist_file.empty()) {
-            throw std::runtime_error("Invalid arguments. Usage: " + std::string(argv[0]) + " -f <hash_file> -w <wordlist>");
-        }
-
         std::cout << "\n[*] Starting at " << get_timestamp() << "\n\n";
 
         std::cout << "[*] Counting hashes to be cracked...\n";
