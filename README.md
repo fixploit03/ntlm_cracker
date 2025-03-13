@@ -1,13 +1,16 @@
+# NTML Cracker
+
+NTLM Hash Cracker
+
 ## Install
 
 ```
-sudo apt install g++ libssl-dev
-```
-
-## Compile
-
-```
-g++ -o ntlm_cracker ntlm_cracker.cpp -lssl -lcrypto -pthread -std=c++17 -O2
+sudo apt-get update
+sudo apt install g++ libssl-dev git
+git clone https://github.com/fixploit03/ntlm_cracker
+cd ntlm_cracker
+sudo make
+sudo make install
 ```
 
 # Usage
