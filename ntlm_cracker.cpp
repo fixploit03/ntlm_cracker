@@ -42,6 +42,7 @@ void print_banner() {
     std::cout << "--------------------------------------------------\n\n";
 }
 
+// Fungsi untuk mengembalikan banner sebagai string (untuk file output)
 std::string get_banner_string() {
     std::stringstream ss;
     ss << "-------------------------------------------------\n";
@@ -64,7 +65,7 @@ void print_help(const char* program_name) {
     std::cout << "  -o <output_file>  Specify the output file to save cracked passwords (optional)\n";
     std::cout << "  -h                Show this help message and exit\n\n";
     std::cout << "Example:\n";
-    std::cout << "  " << program_name << " -f hash.txt -w /usr/share/wordlists/rockyou.txt -o result.txt\n";
+    std::cout << "  " << program_name << " -f hash.txt -w /usr/share/wordlists/rockyou -o result.txt\n";
 }
 
 std::vector<uint8_t> string_to_utf16le(const std::string& str) {
@@ -229,8 +230,7 @@ int main(int argc, char* argv[]) {
     std::cout << "\rProgress: 100.00%\n";
 
     if (!found_passwords.empty()) {
-        print_banner();
-        std::cout << "======= Summary of Found Passwords =======\n\n";
+        std::cout << "\n======= Summary of Found Passwords =======\n\n";
         for (const auto& [hash, password] : found_passwords) {
             std::cout << "[+] " << hash_to_user[hash] << ":" << hash << ":" << password << "\n";
         }
