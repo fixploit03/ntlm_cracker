@@ -19,7 +19,7 @@
 #include <unistd.h>
 #include <algorithm>
 #include <atomic>
-#include <ctime> // Untuk timestamp
+#include <ctime>
 
 struct HashEntry {
     std::string username;
