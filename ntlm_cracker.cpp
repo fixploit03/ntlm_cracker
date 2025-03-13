@@ -19,6 +19,7 @@
 #include <unistd.h>
 #include <algorithm>
 #include <atomic>
+#include <ctime> // Untuk timestamp
 
 struct HashEntry {
     std::string username;
@@ -30,6 +31,19 @@ struct HashEntry {
 std::mutex mtx;
 size_t total_words = 0;
 std::atomic<size_t> processed_words(0);
+
+std::string get_timestamp() {
+    std::time_t now = std::time(nullptr);
+    std::tm* local_time = std::localtime(&now);
+    std::stringstream ss;
+    ss << std::setfill('0') << std::setw(2) << local_time->tm_hour << ":"
+       << std::setfill('0') << std::setw(2) << local_time->tm_min << ":"
+       << std::setfill('0') << std::setw(2) << local_time->tm_sec << " /"
+       << (local_time->tm_year + 1900) << "-"
+       << std::setfill('0') << std::setw(2) << (local_time->tm_mon + 1) << "-"
+       << std::setfill('0') << std::setw(2) << local_time->tm_mday << "/";
+    return ss.str();
+}
 
 void print_banner() {
     std::cout << "-------------------------------------------------\n";
@@ -64,7 +78,7 @@ void print_help(const char* program_name) {
     std::cout << "  -o <output_file>  Specify the output file to save cracked passwords (optional)\n";
     std::cout << "  -h                Show this help message and exit\n\n";
     std::cout << "Example:\n";
-    std::cout << "  " << program_name << " -f hash.txt -w /usr/share/wordlists/rockyou -o result.txt\n";
+    std::cout << "  " << program_name << " -f hash.txt -w /usr/share/wordlists/rockyou.txt -o result.txt\n";
 }
 
 std::vector<uint8_t> string_to_utf16le(const std::string& str) {
@@ -167,6 +181,7 @@ int main(int argc, char* argv[]) {
     }
 
     print_banner();
+    std::cout << "[*] starting @ " << get_timestamp() << "\n\n";
 
     if (hash_file.empty() || wordlist_file.empty()) {
         std::cerr << "Error: Both -f <hash_file> and -w <wordlist> are required.\n";
@@ -256,6 +271,8 @@ int main(int argc, char* argv[]) {
         out_file.close();
         std::cout << "\n[+] Results saved to: " << output_file << "\n";
     }
+
+    std::cout << "\n[*] ending @ " << get_timestamp() << "\n";
 
     return 0;
 }
