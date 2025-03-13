@@ -298,7 +298,7 @@ int main(int argc, char* argv[]) {
         }
 
         if (!password_found) {
-            std::cout << "[*] No passwords were found in the wordlist.\n";
+            std::cout << "[-] No passwords were found in the wordlist.\n";
         }
 
         std::cout << "[*] Finished\n";
