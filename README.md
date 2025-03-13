@@ -1,4 +1,4 @@
-# NTML Cracker
+# NTLM Cracker
 
 NTLM Hash Cracker
 
